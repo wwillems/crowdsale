@@ -24,8 +24,9 @@ contract('DappTokenCrowdsale', function([_, wallet, investor1, investor2]) {
 		// Crowdsale config
 		this.rate = 500;
 		this.wallet = wallet;
+		this.cap = ether(100);
 
-		this.crowdsale = await DappTokenCrowdsale.new(this.rate, this.wallet, this.token.address);
+		this.crowdsale = await DappTokenCrowdsale.new(this.rate, this.wallet, this.token.address, this.cap);
 
 		// Transfer token owenship to crowdsale
 		await this.token.transferOwnership(this.crowdsale.address);
@@ -54,6 +55,14 @@ contract('DappTokenCrowdsale', function([_, wallet, investor1, investor2]) {
 			assert.isTrue(newTotalSupply > originalTotalSupply);
 		})
 	})
+
+	describe('capped crowdsale', async function() {
+		it('has the correct hard cap', async function() {
+			const cap = await this.crowdsale.cap();
+			cap.should.be.bignumber.equal(this.cap);
+		})
+	})
+
 	describe('accepting payments', function() {
 		it('should accept payments', async function() {
 			const value = ether(1);
