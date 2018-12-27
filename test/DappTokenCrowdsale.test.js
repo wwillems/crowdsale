@@ -1,4 +1,7 @@
 import ether from './helpers/ether';
+import EVMRevert from './helpers/EVMRevert';
+import { increaseTimeTo, duration } from './helpers/increaseTime';
+import latestTime from './helpers/latestTime';
 
 const BigNumber = web3.BigNumber;
 
@@ -25,11 +28,28 @@ contract('DappTokenCrowdsale', function([_, wallet, investor1, investor2]) {
 		this.rate = 500;
 		this.wallet = wallet;
 		this.cap = ether(100);
+		this.openingTime = latestTime() + duration.weeks(1);
+		this.closingTime = this.openingTime + duration.weeks(1);
 
-		this.crowdsale = await DappTokenCrowdsale.new(this.rate, this.wallet, this.token.address, this.cap);
+		this.investorMinCap = ether(0.002);
+		this.investorMaxCap = ether(50);
+
+		this.crowdsale = await DappTokenCrowdsale.new(
+			this.rate, 
+			this.wallet, 
+			this.token.address, 
+			this.cap,
+			this.openingTime,
+			this.closingTime
+		);
 
 		// Transfer token owenship to crowdsale
 		await this.token.transferOwnership(this.crowdsale.address);
+
+		// add investors to whitelist
+		await this.crowdsale.addManyToWhitelist([investor1, investor2]);
+
+		await increaseTimeTo(this.openingTime + 1);
 	});
 
 	describe('crowdsale', function() {
@@ -63,6 +83,20 @@ contract('DappTokenCrowdsale', function([_, wallet, investor1, investor2]) {
 		})
 	})
 
+	describe('timed crowdsale', function() {
+		it('is open', async function() {
+			const isClosed = await this.crowdsale.hasClosed();
+			isClosed.should.be.false;
+		})
+	})
+
+	describe('whitelisted crowdsale', function() {
+	it('rejects contributions from non-whitelisted investors', async function() {
+	  const notWhitelisted = _;
+	  await this.crowdsale.buyTokens(notWhitelisted, { value: ether(1), from: notWhitelisted }).should.be.rejectedWith(EVMRevert);
+	});
+	});
+
 	describe('accepting payments', function() {
 		it('should accept payments', async function() {
 			const value = ether(1);
@@ -71,6 +105,48 @@ contract('DappTokenCrowdsale', function([_, wallet, investor1, investor2]) {
 			await this.crowdsale.buyTokens(investor1, {value: value, from: purchaser}).should.be.fulfilled;
 		})
 	})
+
+	describe('buyTokens()', function() {
+		describe('when the contribution is less than the minimum cap', function() {
+			it('rejects the transaction', async function() {
+				const value = this.investorMinCap - 1;
+				await this.crowdsale.buyTokens(investor2, {value: value, from: investor2}).should.be.rejectedWith(EVMRevert);
+			})
+		})
+	})
+
+	describe('when the investor has already met the minimum cap', function() {
+		it('allows the investor to contribute below the minimum cap', async function() {
+		// First contribution is valid
+		const value1 = ether(1);
+		await this.crowdsale.buyTokens(investor1, { value: value1, from: investor1 });
+		// Second contribution is less than investor cap
+		const value2 = 1; // wei
+		await this.crowdsale.buyTokens(investor1, { value: value2, from: investor1 }).should.be.fulfilled;
+		});
+    });
+
+	describe('when the total contributions exceed the investor hard cap', function () {
+		it('rejects the transaction', async function () {
+		  // First contribution is in valid range
+		  const value1 = ether(2);
+		  await this.crowdsale.buyTokens(investor1, { value: value1, from: investor1 });
+		  // Second contribution sends total contributions over investor hard cap
+		  const value2 = ether(49);
+		  await this.crowdsale.buyTokens(investor1, { value: value2, from: investor1 }).should.be.rejectedWith(EVMRevert);
+		});
+	});
+
+	describe('when the contribution is within the valid range', function () {
+	    const value = ether(2);
+	    it('succeeds & updates the contribution amount', async function () {
+	      await this.crowdsale.buyTokens(investor2, { value: value, from: investor2 }).should.be.fulfilled;
+	      const contribution = await this.crowdsale.getUserContribution(investor2);
+	      contribution.should.be.bignumber.equal(value);
+    });
+
+  });
+
 });
 
 
